@@ -14,7 +14,7 @@ bpy.context.view_layer.objects.active = a; bpy.ops.object.mode_set(mode='POSE')
 P = a.pose.bones
 for pb in P: pb.rotation_mode = 'QUATERNION'
 
-L = 0.42  # comprimento coxa/canela
+L = 0.41  # comprimento coxa/canela
 def upd(): bpy.context.view_layer.update()
 def rot(name, axis, deg):
     """Gira o osso em torno da cabeca, em eixos do mundo (X=lado, Y=tras, Z=cima)."""
