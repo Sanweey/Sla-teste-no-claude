@@ -14,6 +14,7 @@ bpy.context.view_layer.objects.active = a; bpy.ops.object.mode_set(mode='POSE')
 P = a.pose.bones
 for pb in P: pb.rotation_mode = 'QUATERNION'
 
+L = 0.42  # comprimento coxa/canela
 def upd(): bpy.context.view_layer.update()
 def rot(name, axis, deg):
     """Gira o osso em torno da cabeca, em eixos do mundo (X=lado, Y=tras, Z=cima)."""
@@ -22,9 +23,14 @@ def rot(name, axis, deg):
     pb.matrix = T @ Matrix.Rotation(math.radians(deg), 4, axis) @ T.inverted() @ pb.matrix
     upd()
 
-L = 0.42  # comprimento coxa/canela
-def pose(rise, knee, lean, arm_down, arm_back):
-    """rise = quanto o quadril sobe (m) alem do que o joelho ja abaixa; knee = flexao em graus."""
+ARM = ("clavicle", "upperarm", "forearm", "hand")
+LAG = {"L": 2, "R": 3}          # bracos atrasam em relacao ao corpo (overlap)
+SIDE_AMP = {"L": 1.0, "R": 0.88}  # lados levemente diferentes, pra nao ficar robotico
+
+def pose(rise, knee, lean, abd, swing, elbow):
+    """rise = subida do quadril (m); knee/lean em graus;
+    abd = abertura do braco pro lado a partir de pendurado; swing = balanco no plano
+    frente/tras (negativo = pra frente e pra cima, positivo = pra tras); elbow = flexao."""
     for pb in P: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
     upd()
     drop = 2 * L * (1 - math.cos(math.radians(knee)))
@@ -32,26 +38,36 @@ def pose(rise, knee, lean, arm_down, arm_back):
     rot("spine", 'X', -lean * 0.5); rot("chest", 'X', -lean * 0.5)
     rot("neck", 'X', lean * 0.4); rot("head", 'X', lean * 0.4)
     for s, sg in (("L", 1), ("R", -1)):
-        rot(f"upperarm.{s}", 'Y', sg * arm_down)         # abaixa o braco da T-pose
-        rot(f"upperarm.{s}", 'X', arm_back)               # balanca pra tras/frente
-        rot(f"forearm.{s}", 'X', -20)                     # cotovelo levemente dobrado
-        rot(f"thigh.{s}", 'X', -knee)                     # joelho vai pra frente (-Y)
-        rot(f"shin.{s}", 'X', knee * 2)                   # canela volta
-        rot(f"foot.{s}", 'X', -knee)                      # pe fica reto
+        amp = SIDE_AMP[s]
+        sw, ab = swing * amp, abd * (1.1 if s == "R" else 1.0)
+        raise_ = max(0, -sw) / 140                       # 0..1 quanto o braco sobe
+        rot(f"clavicle.{s}", 'Y', -sg * raise_ * 14)     # ombro sobe junto
+        rot(f"upperarm.{s}", 'Y', sg * (88 - ab))        # T-pose -> braco pendurado
+        rot(f"upperarm.{s}", 'X', sw)                    # balanco frente/tras
+        rot(f"forearm.{s}", 'X', -(elbow + 8 * raise_) * amp)
+        rot(f"thigh.{s}", 'X', -knee)
+        rot(f"shin.{s}", 'X', knee * 2)
+        rot(f"foot.{s}", 'X', -knee)
 
-# frame: (rise, knee, lean, arm_down, arm_back)
-KEYS = {1:  (0.00, 5, 0, 75, 0),
-        10: (0.00, 42, 22, 85, 40),     # agacha, bracos pra tras
-        17: (0.30, 0, -5, 15, -30),     # impulso, bracos sobem
-        24: (0.42, 22, 5, 25, -15),     # apice, joelhos recolhem
-        31: (0.25, 5, 0, 50, 0),        # descendo
-        37: (0.00, 38, 18, 80, 30),     # aterrissa, absorve
-        43: (0.00, 14, 6, 75, 10),      # levanta
-        48: (0.00, 5, 0, 75, 0)}
+# frame: (rise, knee, lean, abd, swing, elbow)
+KEYS = {1:  (0.00, 5, 0, 12, 5, 15),
+        10: (0.00, 42, 22, 10, 55, 25),     # agacha, bracos balancam pra tras
+        17: (0.30, 0, -5, 25, -140, 10),    # impulso: bracos sobem pra frente
+        24: (0.42, 22, 5, 55, -95, 20),     # apice: bracos abertos
+        31: (0.25, 5, 0, 40, -50, 20),      # descendo
+        37: (0.00, 38, 18, 20, -30, 35),    # aterrissa, bracos pra equilibrio
+        43: (0.00, 14, 6, 12, 15, 20),      # levanta
+        48: (0.00, 5, 0, 12, 5, 15)}
 for f, args in KEYS.items():
     sc.frame_set(f); pose(*args)
     for pb in P:
-        pb.keyframe_insert("rotation_quaternion", frame=f); pb.keyframe_insert("location", frame=f)
+        base = pb.name.split(".")[0]
+        if base in ARM:
+            side = pb.name.split(".")[1]
+            fr = f if f == 1 else min(f + LAG[side], 48)
+        else:
+            fr = f
+        pb.keyframe_insert("rotation_quaternion", frame=fr); pb.keyframe_insert("location", frame=fr)
 bpy.ops.object.mode_set(mode='OBJECT')
 sc.frame_start, sc.frame_end = 1, 48
 
