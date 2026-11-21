@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bake_jiggle
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "jump_frames"); os.makedirs(OUT, exist_ok=True)
-bpy.ops.wm.open_mainfile(filepath=os.path.join(HERE, "mannequin_base.blend"))
+bpy.ops.wm.open_mainfile(filepath=os.path.join(HERE, "character_model.blend"))
 a = bpy.data.objects["Rig"]; sc = bpy.context.scene
 if a.animation_data: a.animation_data_clear()
 bpy.context.view_layer.objects.active = a; bpy.ops.object.mode_set(mode='POSE')
@@ -75,14 +75,14 @@ sc.frame_start, sc.frame_end = 1, 48
 bake_jiggle.SETTINGS["jiggle_breast"] = dict(freq=2.0, damping=0.04, max_offset=0.28)
 bake_jiggle.SETTINGS["jiggle_glute"] = dict(freq=2.3, damping=0.05, max_offset=0.24)
 bake_jiggle.bake(a)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(HERE, "jump_animation.blend"))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(HERE, "char_jump_animation.blend"))
 
 # chao + render
 bpy.ops.mesh.primitive_plane_add(size=6, location=(0, 0, -0.005))
 sc.render.engine = 'BLENDER_WORKBENCH'; sc.render.resolution_x, sc.render.resolution_y = 360, 480
-sh = sc.display.shading; sh.light = 'STUDIO'; sh.color_type = 'OBJECT'
-body = bpy.data.objects["Body"]; body.color = (0.85, 0.65, 0.55, 1)
-bpy.data.objects["Plane"].color = (0.35, 0.4, 0.45, 1)
+sh = sc.display.shading; sh.light = 'STUDIO'; sh.color_type = 'MATERIAL'
+pm = bpy.data.materials.new("floor"); pm.diffuse_color = (0.35, 0.4, 0.45, 1)
+bpy.data.objects["Plane"].data.materials.append(pm)
 def mkcam(name, loc, target, scale):
     cd = bpy.data.cameras.new(name); cd.type = 'ORTHO'; cd.ortho_scale = scale
     c = bpy.data.objects.new(name, cd); sc.collection.objects.link(c)
