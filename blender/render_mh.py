@@ -12,8 +12,15 @@ def rot(name, axis, deg):
     pb.matrix = T @ Matrix.Rotation(math.radians(deg), 4, axis) @ T.inverted() @ pb.matrix
     bpy.context.view_layer.update()
 ARM_DOWN = float(os.environ.get("ARM_DOWN", 28))
-for s, sg in (("L", 1), ("R", -1)):
-    rot(f"upperarm01.{s}", 'Y', sg * ARM_DOWN); rot(f"lowerarm01.{s}", 'X', -10)
+POSE = os.environ.get("POSE", "natural")
+if POSE in ("natural",):
+    sys.path.insert(0, HERE); import poses
+    if os.environ.get("ARM_TWIST"): poses.ARM_TWIST = float(os.environ["ARM_TWIST"])
+    if os.environ.get("CURL_SIGN"): poses.CURL_SIGN = float(os.environ["CURL_SIGN"])
+    poses.apply(a, POSE)
+else:
+    for s, sg in (("L", 1), ("R", -1)):
+        rot(f"upperarm01.{s}", 'Y', sg * ARM_DOWN); rot(f"lowerarm01.{s}", 'X', -10)
 if os.environ.get("POSE") == "teste":   # pose forcada pra checar deformacao
     rot("spine03", 'X', -15)
     for s, sg in (("L", 1), ("R", -1)):
@@ -67,8 +74,10 @@ views = {"frente": ((0, -5.4, mid + 0.1), (0, 0, mid), 60, (600, 800), 4.0),
          "tres_quartos": ((3.4, -4.1, mid + 0.35), (0, 0, mid), 60, (600, 800), 4.0),
          "lado": ((5.4, 0, mid + 0.1), (0, 0, mid), 60, (600, 800), 4.0),
          "costas": ((0, 3.3, mid + 0.1), (0, 0, mid), 40, (600, 800), 4.0),
+         "maos": ((0.5, -1.7, 0.95), (0, 0, 0.85), 50, (800, 600), 8.0),
          "rosto": ((0.38, -1.15, head_z + 0.07), (0, 0, head_z + 0.06), 85, (700, 800), 5.6)}
 only = [v for v in sys.argv if v in views]
+if not only: only = [v for v in views if v != "maos"]
 for n, (loc, tgt, lens, res, fstop) in views.items():
     if only and n not in only: continue
     sc.camera = cam(n, loc, tgt, lens, fstop); sc.render.resolution_x, sc.render.resolution_y = res
