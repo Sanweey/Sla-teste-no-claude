@@ -14,20 +14,23 @@ from mathutils import Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 MH_TARGETS = os.environ.get("MH_TARGETS", "/tmp/mh/pypi/makehuman/data/targets.npz")
 MH_DATA = os.environ.get("MH_DATA", "/tmp/mh/npm/package/public/data")
+# texturas em alta (pele 2048px, olhos 1024px) do pacote npm ara3d-data (CC0, derivado do MakeHuman)
+ARA_TEX = os.environ.get("ARA_TEX", "/tmp/mh/ara/package/assets/textures")
 
 # ------------------------------------------------------------------ AJUSTES DO CORPO
 # 0..1 como no MakeHuman. gender 0 = feminino. age 0.5 = 25 anos.
 MACRO = dict(gender=0.0, age=0.5, muscle=0.55, weight=0.48, height=0.52, proportions=0.8,
              race=dict(caucasian=1.0, african=0.0, asian=0.0))
-BREAST = dict(cup=0.62, firmness=0.6)      # 0..1 (0.5 = medio)
+BREAST = dict(cup=0.92, firmness=0.68)     # 0..1 (0.5 = medio)
 EXTRA = {                                  # morphs extras: nome -> peso (negativo = lado "decr")
-    "buttocks/buttocks-volume": 0.35,
-    "hip/hip-scale-horiz": 0.20,
+    "buttocks/buttocks-volume": 0.85,
+    "hip/hip-scale-horiz": 0.30,
     "measure/measure-waist-circ": -0.35,
     "stomach/stomach-tone": 0.4,
     "bodyshapes/bodyshapes-elvs-fem-neat-hourglass": 0.45,
 }
-SKIN = "young_caucasian_female/textures/young_lightskinned_female_diffuse.png"
+SKIN = "young_caucasian_female/textures/young_lightskinned_female_diffuse.png"   # fallback 512px
+SKIN_HD = "skin_young_caucasian_female.jpg"
 HAIR = "long01"
 EYE_COLOR = "brown"
 OUTFIT = ["F_Bikini_01"]                  # roupas (objetos separados, da pra esconder)
@@ -82,6 +85,7 @@ def macro_weights(m):
 # ------------------------------------------------------------------ malha base
 base = json.load(open(os.path.join(MH_DATA, "models/human_full_size.json")))
 co = np.array(base["vertices"], dtype=np.float64).reshape(-1, 3)
+co0 = co.copy()
 nverts = len(co)
 applied = 0
 for name, w in macro_weights(MACRO).items():
@@ -92,6 +96,21 @@ for name, w in macro_weights(MACRO).items():
 print("morphs aplicados:", applied)
 
 GROUND = 0.0
+def sync_helpers():
+    """Os morphs de busto/gluteo nao movem a 'malha auxiliar' (meia-calca, cabelo...) onde as
+    roupas sao encaixadas. Cada vertice auxiliar herda a deformacao do vertice do corpo mais proximo."""
+    from mathutils import kdtree
+    bset = sorted({v for f in parse_faces(base["faces"]) if f[1] in body_mat_idx for v in f[0]})
+    kd = kdtree.KDTree(len(bset))
+    for j, vi in enumerate(bset): kd.insert(Vector(co0[vi]), j)
+    kd.balance()
+    isb = np.zeros(nverts, bool); isb[bset] = True
+    d = co - co0
+    for vi in np.where(~isb)[0]:
+        _, j, _ = kd.find(Vector(co0[vi]))
+        bd = d[bset[j]]
+        if np.linalg.norm(bd) > np.linalg.norm(d[vi]): co[vi] = co0[vi] + bd
+
 def mh2bl(c):   # MakeHuman (Y cima, frente +Z, dm) -> Blender (Z cima, frente -Y, m), pes no z=0
     return np.stack([c[:, 0], -c[:, 2], c[:, 1]], axis=1) * UNIT - np.array([0, 0, GROUND])
 
@@ -140,6 +159,7 @@ body, _ = make_mesh("Body", mh2bl(co), body_faces, base["uvs"][0], keep=set(body
 print("altura: %.2f m" % (mh2bl(co[_bv])[:, 2].max()))
 
 # ------------------------------------------------------------------ esqueleto
+sync_helpers()
 bones_js = base["bones"]; names = [b["name"] for b in bones_js]
 jp = base["metadata"]["joint_pos_idxs"]
 def joint(n): return mh2bl(co[jp[n]]).mean(axis=0)
@@ -235,8 +255,45 @@ def tex_mat(name, img_path, rough=0.5, sss=0.0, alpha=False, bump=0.0, spec=0.5)
 def set_mat(ob, m):
     ob.data.materials.clear(); ob.data.materials.append(m)
     for p in ob.data.polygons: p.material_index = 0
-set_mat(body, tex_mat("Skin", P("skins", SKIN), 0.48, sss=0.25, bump=0.08, spec=0.4))
-set_mat(eyes, tex_mat("Eyes", P(f"proxies/eyes/HighPolyEyes/textures/{EYE_COLOR}_eye.png"), 0.05, alpha=True, spec=0.6))
+def skin_material(img_path):
+    """Pele: textura + subsurface com raios de pele real + poros/microrrugas + oleosidade variavel."""
+    m = bpy.data.materials.new("Skin"); m.use_nodes = True; nt = m.node_tree; N, L = nt.nodes, nt.links
+    b = N["Principled BSDF"]
+    tc = N.new("ShaderNodeTexCoord")
+    tx = N.new("ShaderNodeTexImage"); tx.image = bpy.data.images.load(img_path)
+    hs = N.new("ShaderNodeHueSaturation"); hs.inputs["Saturation"].default_value = 1.12; hs.inputs["Value"].default_value = 0.9
+    L.new(tx.outputs["Color"], hs.inputs["Color"]); L.new(hs.outputs["Color"], b.inputs["Base Color"])
+    b.inputs["Subsurface Weight"].default_value = 0.45
+    b.inputs["Subsurface Radius"].default_value = (1.0, 0.37, 0.19)     # proporcao R:G:B de pele real
+    b.inputs["Subsurface Scale"].default_value = 0.0045
+    b.inputs["Specular IOR Level"].default_value = 0.5
+    b.inputs["Coat Weight"].default_value = 0.06; b.inputs["Coat Roughness"].default_value = 0.35
+    # oleosidade: rugosidade varia em manchas grandes
+    nr = N.new("ShaderNodeTexNoise"); nr.inputs["Scale"].default_value = 35; L.new(tc.outputs["Object"], nr.inputs["Vector"])
+    mr = N.new("ShaderNodeMapRange"); mr.inputs["To Min"].default_value = 0.36; mr.inputs["To Max"].default_value = 0.56
+    L.new(nr.outputs["Fac"], mr.inputs["Value"]); L.new(mr.outputs["Result"], b.inputs["Roughness"])
+    # relevo: poros -> microrrugas -> detalhe da propria textura
+    np_ = N.new("ShaderNodeTexNoise"); np_.inputs["Scale"].default_value = 2400; np_.inputs["Detail"].default_value = 2
+    L.new(tc.outputs["Object"], np_.inputs["Vector"])
+    vo = N.new("ShaderNodeTexVoronoi"); vo.inputs["Scale"].default_value = 700; L.new(tc.outputs["Object"], vo.inputs["Vector"])
+    bw = N.new("ShaderNodeRGBToBW"); L.new(tx.outputs["Color"], bw.inputs["Color"])
+    prev = None
+    for src, out, st, dist in ((np_, "Fac", 0.14, 0.00012), (vo, "Distance", 0.07, 0.0001), (bw, "Val", 0.06, 0.0004)):
+        bp = N.new("ShaderNodeBump"); bp.inputs["Strength"].default_value = st; bp.inputs["Distance"].default_value = dist
+        L.new(src.outputs[out], bp.inputs["Height"])
+        if prev: L.new(prev.outputs["Normal"], bp.inputs["Normal"])
+        prev = bp
+    L.new(prev.outputs["Normal"], b.inputs["Normal"])
+    return m
+skin_path = os.path.join(ARA_TEX, SKIN_HD)
+if not os.path.exists(skin_path): skin_path = P("skins", SKIN); print("  (sem textura HD, usando 512px)")
+set_mat(body, skin_material(skin_path))
+eye_path = os.path.join(ARA_TEX, f"eyes_{EYE_COLOR}.png")
+if not os.path.exists(eye_path): eye_path = P(f"proxies/eyes/HighPolyEyes/textures/{EYE_COLOR}_eye.png")
+em = tex_mat("Eyes", eye_path, 0.15, alpha=True, spec=0.5)
+eb_ = em.node_tree.nodes["Principled BSDF"]
+eb_.inputs["Coat Weight"].default_value = 1.0; eb_.inputs["Coat Roughness"].default_value = 0.02   # olho "molhado"
+set_mat(eyes, em)
 set_mat(brows, tex_mat("Eyebrows", P("proxies/eyebrows/eyebrow001/textures/eyebrow001.png"), 0.6, alpha=True))
 set_mat(lashes, tex_mat("Eyelashes", P("proxies/eyelashes/Eyelashes01/textures/eyelashes01.png"), 0.6, alpha=True))
 set_mat(teeth, tex_mat("Teeth", P("proxies/teeth/Teeth_Base/textures/teeth.png"), 0.3, alpha=True))
@@ -287,12 +344,28 @@ kd.balance()
 bv = [v.co.copy() for v in body.data.vertices]
 add_glute(body, bv, [gw[kd.find(p)[1]] for p in bv])
 
+# ------------------------------------------------------------------ roupa por fora do corpo
+# os proxies foram feitos pra base; com busto/gluteo maiores o corpo atravessaria o tecido
+for ob in outfit:
+    bpy.ops.object.select_all(action='DESELECT'); bpy.context.view_layer.objects.active = ob; ob.select_set(True)
+    sw = ob.modifiers.new("Shrinkwrap", 'SHRINKWRAP'); sw.target = body
+    sw.wrap_method = 'NEAREST_SURFACEPOINT'; sw.wrap_mode = 'OUTSIDE'; sw.offset = 0.0025
+    bpy.ops.object.modifier_apply(modifier="Shrinkwrap")
+    sm = ob.modifiers.new("Smooth", 'CORRECTIVE_SMOOTH'); sm.factor = 0.5; sm.iterations = 4
+    bpy.ops.object.modifier_apply(modifier="Smooth")
+    sw = ob.modifiers.new("Shrinkwrap", 'SHRINKWRAP'); sw.target = body
+    sw.wrap_method = 'NEAREST_SURFACEPOINT'; sw.wrap_mode = 'OUTSIDE'; sw.offset = 0.0025
+    bpy.ops.object.modifier_apply(modifier="Shrinkwrap")
+
 # ------------------------------------------------------------------ amarra tudo no rig
 for ob in [body, eyes, brows, lashes, teeth, hair] + outfit:
     ob.parent = arm
     am = ob.modifiers.new("Armature", 'ARMATURE'); am.object = arm
 for ob in [body] + outfit:
     ss = ob.modifiers.new("Subdivision", 'SUBSURF'); ss.levels = 1; ss.render_levels = 2
+for ob in outfit:   # mantem o tecido por fora do corpo depois da subdivisao e em qualquer pose
+    sw = ob.modifiers.new("KeepOutside", 'SHRINKWRAP'); sw.target = body
+    sw.wrap_method = 'NEAREST_SURFACEPOINT'; sw.wrap_mode = 'OUTSIDE'; sw.offset = 0.002
 bpy.context.view_layer.objects.active = body
 bpy.ops.object.vertex_group_limit_total(group_select_mode='ALL', limit=4)
 bpy.ops.object.vertex_group_normalize_all(group_select_mode='ALL', lock_active=False)
