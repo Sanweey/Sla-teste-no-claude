@@ -14,8 +14,8 @@ for f, z in {1: 0, 8: -0.08, 16: 0.25, 24: 0, 32: -0.08, 40: 0.25, 48: 0}.items(
     pb.location = (0, z, 0); pb.keyframe_insert("location", frame=f)
 bpy.ops.object.mode_set(mode='OBJECT')
 # jiggle exagerado so para este teste (os valores padrao do bake_jiggle.py ficam como estao)
-bake_jiggle.SETTINGS["jiggle_breast"] = dict(freq=2.5, damping=0.08, max_offset=0.16)
-bake_jiggle.SETTINGS["jiggle_glute"] = dict(freq=3.0, damping=0.10, max_offset=0.14)
+bake_jiggle.SETTINGS["jiggle_breast"] = dict(freq=2.0, damping=0.04, max_offset=0.28)
+bake_jiggle.SETTINGS["jiggle_glute"] = dict(freq=2.3, damping=0.05, max_offset=0.24)
 bake_jiggle.bake(a)
 sc.render.engine = 'BLENDER_WORKBENCH'
 sc.render.resolution_x, sc.render.resolution_y = 360, 480
